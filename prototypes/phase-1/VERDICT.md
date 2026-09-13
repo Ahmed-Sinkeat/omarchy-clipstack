@@ -1,5 +1,9 @@
 # Phase 1 verdict
 
+> [!NOTE]
+> Kept because it is why the editor lives in the clipboard's own detail pane
+> rather than in a second overlay.
+
 **Status:** Direction selected
 
 **Winning variant:** A — In-place pane

@@ -1,81 +1,96 @@
-# ClipEdit for Omarchy
+# Clipstack for Omarchy
 
-Edit clipboard text inside Omarchy's native clipboard manager. Select a text entry, press `Ctrl+E`, edit it in the existing detail pane, then press `Ctrl+Enter` to copy the edit as a new clipboard entry. `Esc` cancels and preserves the original.
+A replacement for Omarchy's clipboard overlay that adds two things to it: **tick
+several entries and act on them together**, and **edit a text entry in place**.
 
-> [!IMPORTANT]
-> ClipEdit is currently a preview. It requires the extension support proposed in [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919), which is not part of a released Omarchy version yet.
+Select entries with `Ctrl+Enter`, then `Enter` pastes them as one payload. Text
+entries join with newlines; images contribute their `file://` path; a selection of
+nothing but images or files is copied as `text/uri-list`, so file managers and
+image editors receive it as files.
 
-ClipEdit implements [Variant A](prototypes/phase-1/VERDICT.md). It does not add a second overlay, replace clipboard history, or edit images.
+`Ctrl+E` opens the selected text entry in the detail pane, `Ctrl+Enter` copies the
+edit as a new entry, and `Esc` cancels with the original untouched.
 
-## Project state
+## Install
 
-| Phase | Status |
-|---|---|
-| 1 — validate the interaction | Done — Variant A selected |
-| 2 — design the extension hook | Done — see [the extension design](docs/phase-2-extension-hook.md) |
-| 3 — implement it upstream | Submitted in [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919) |
-| 4 — build ClipEdit | Done — plugin manifest and entry point now live at the repository root |
-| 5 — compatibility testing | In progress — public package validation passes; final built-in-host verification remains |
+```bash
+omarchy plugin add https://github.com/Ahmed-Sinkeat/omarchy-clipedit.git
+omarchy plugin enable sinkeat.clipboard
+```
 
-The full proposal is in [omarchy-clipedit-project.md](omarchy-clipedit-project.md).
+The manifest declares `omarchy.clonedFrom = omarchy.clipboard`, so the existing
+`Super+Ctrl+V` binding routes here and Omarchy disables the built-in overlay.
+Removing the plugin restores it. No keybinding or config changes are required.
 
 ## Shortcuts
 
 | Action | Shortcut |
 |---|---|
-| Edit the selected text entry | `Ctrl+E` |
-| Copy the edit as a new entry | `Ctrl+Enter` |
-| Cancel | `Esc` |
+| Tick the entry under the cursor | `Ctrl+Enter` |
+| Paste every ticked entry as one payload | `Enter` |
+| Copy them without pasting | `Shift+Enter` |
+| Remove every ticked entry | `Delete` |
+| Drop the selection | `Esc` |
+| Edit the entry under the cursor | `Ctrl+E` |
+| Copy the edit as a new entry | `Ctrl+Enter` (in the editor) |
+| Cancel the edit | `Esc` |
 
-An empty edit is not saved: the editor stays open and asks for text. Images and empty history entries do not offer the Edit action.
+Nothing has to be memorised: both actions are buttons in the detail pane
+(`Select  Ctrl+Enter` and `Edit  Ctrl+E`), a ticked row is tinted and marked `✓`,
+and the footer reads `3 selected · Enter pastes as files` — so the payload a paste
+will produce is visible before you press it.
 
-## Requirements
+With nothing ticked every key keeps its stock behaviour: `Enter` pastes,
+`Shift+Enter` copies, `Alt+Enter` opens, `Delete` removes, `Shift+Delete` clears.
 
-ClipEdit uses Omarchy's proposed `PluginExtensions` slot. Until [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919) lands, it needs the matching host implementation from the fork's [`clipboard-extension-point`](https://github.com/Ahmed-Sinkeat/omarchy/tree/clipboard-extension-point) branch. The temporary `sinkeat.clipboard` clone in the development session provides that host.
-
-## Install
-
-The public repository can be installed normally because `manifest.json` is at the repository root:
-
-```bash
-omarchy plugin add https://github.com/Ahmed-Sinkeat/omarchy-clipedit.git
-omarchy plugin enable sinkeat.clipedit
-```
-
-The extension point must also be present in the running Omarchy version; installing ClipEdit on a standard release does not make it usable yet.
+A selection is tracked by entry content, not by row: the clipboard watcher rewrites
+history on every copy and saving an edit prepends an entry, so ticks stay on the
+entries you picked. An empty edit is not saved. Images offer no Edit action.
 
 ## Layout
 
 ```text
-manifest.json          third-party plugin manifest
-ClipEdit.qml           editor UI and host interaction
-ClipEditModel.js       reusable clipboard-write lifecycle
-test/                  plugin regression tests
-docs/                  extension design and verification records
+manifest.json          plugin manifest, cloned from omarchy.clipboard
+Clipboard.qml          overlay, selection state, and the editor pane
+ClipboardHistory.js    history model, selection set, and payload join
+ClipboardWrite.js      the wl-copy stdin lifecycle, shared by both writers
+paste-selection.sh     copies a joined selection and pastes it
+test/                  regression tests
+docs/                  design and verification records
 prototypes/phase-1/    retained interaction evidence
+plan.md                the multi-select merge plan
 ```
 
 ## Verification
 
 ```bash
-./test/clipedit-test.sh
-cd ~/Projects/omarchy/omarchy
-./bin/omarchy-plugin-validate ~/Projects/omarchy/plugins
-./test/shell.d/clipboard-test.sh
-./test/shell.d/plugin-extensions-test.sh
+./test/clipstack-test.sh                            # selection, join, copy lifecycle
+qmllint Clipboard.qml                               # QML parses
+omarchy plugin validate ~/Projects/omarchy/plugins  # manifest
 ```
 
-See [the compatibility record](docs/phase-5-verification.md) for the live-session coverage and remaining release checks.
+After a change to `Clipboard.qml`, run `omarchy-restart-shell`: a `keepLoaded`
+overlay does not hot-reload.
+
+Because the plugin is a clone, upstream changes to
+`/usr/share/omarchy/shell/plugins/clipboard/Clipboard.qml` do not arrive on their
+own. After an Omarchy update, check what moved:
+
+```bash
+diff -u /usr/share/omarchy/shell/plugins/clipboard/Clipboard.qml Clipboard.qml
+```
+
+## History
+
+Clipstack began as **ClipEdit** — hence the repository name — an `extension` plugin
+hosted by the built-in clipboard through
+the slot proposed in [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919),
+which is still open. Multi-select cannot be expressed by that contract — it needs
+selection state, row rendering and key handling in the host — so the editor moved
+into the overlay and the extension slot was deleted. Nothing here waits on the PR
+any more; it stands on its own merits upstream. See [plan.md](plan.md) for the
+decision and [docs/](docs) for the earlier phases.
 
 ## License
 
-ClipEdit is available under the [MIT License](LICENSE).
-
-## The upstream half
-
-The upstream change is [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919). It contains no ClipEdit-specific editing logic. After it ships, remove the temporary clipboard clone and re-enable `omarchy.clipboard`:
-
-```bash
-omarchy plugin remove sinkeat.clipboard
-omarchy-shell shell setPluginEnabled omarchy.clipboard true
-```
+Clipstack is available under the [MIT License](LICENSE).

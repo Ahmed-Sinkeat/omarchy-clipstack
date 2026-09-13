@@ -1,4 +1,5 @@
-// Clipboard writes have one ordering constraint: stdin must be reopened before
+// The one writer for every clipboard payload this plugin produces — a joined
+// selection and a saved edit alike. Clipboard writes have one ordering constraint: stdin must be reopened before
 // a reused Quickshell Process starts, then closed after the payload is written
 // so wl-copy sees EOF. Keep that lifecycle behind this small interface so the
 // QML editor does not have to repeat or remember it.

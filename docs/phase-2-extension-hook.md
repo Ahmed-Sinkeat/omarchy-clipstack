@@ -1,5 +1,11 @@
 # Phase 2 — the extension hook
 
+> [!NOTE]
+> This documents the **upstream** contribution in [Omarchy PR #10919](https://github.com/omacom/omarchy/pull/10919),
+> which is still open. The shipped plugin no longer uses the slot: multi-select needs
+> selection state in the host, so the editor moved into the overlay instead. See
+> [plan.md](../plan.md).
+
 **Status:** Decided and implemented. The upstream change is on the
 `clipboard-extension-point` branch of the Omarchy fork.
 

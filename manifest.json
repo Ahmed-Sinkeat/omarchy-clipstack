@@ -1,15 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "sinkeat.clipedit",
-  "name": "ClipEdit",
-  "version": "0.1.0",
+  "id": "sinkeat.clipboard",
+  "name": "Clipstack",
+  "version": "0.2.0",
   "author": "Ahmed Sinkeat",
-  "description": "Edit clipboard text in place, inside the Omarchy clipboard",
-  "kinds": ["extension"],
+  "description": "Clipboard history with multi-select and inline text editing",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
   "entryPoints": {
-    "extension": "ClipEdit.qml"
+    "overlay": "Clipboard.qml"
   },
-  "extension": {
-    "host": "omarchy.clipboard"
+  "omarchy": {
+    "clonedFrom": "omarchy.clipboard"
   }
 }
