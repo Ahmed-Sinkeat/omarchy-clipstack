@@ -15,7 +15,7 @@ edit as a new entry, and `Esc` cancels with the original untouched.
 
 ```bash
 omarchy plugin add https://github.com/Ahmed-Sinkeat/omarchy-clipstack.git
-omarchy plugin enable sinkeat.clipboard
+omarchy plugin enable sinkeat.clipstack
 ```
 
 The manifest declares `omarchy.clonedFrom = omarchy.clipboard`, so the existing
@@ -25,7 +25,7 @@ keybinding or config changes are required.
 ## Remove
 
 ```bash
-omarchy plugin remove sinkeat.clipboard
+omarchy plugin remove sinkeat.clipstack
 ```
 
 That re-enables the built-in clipboard overlay and hands `Super+Ctrl+V` back to it.
