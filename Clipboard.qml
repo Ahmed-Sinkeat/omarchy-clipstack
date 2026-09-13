@@ -743,8 +743,7 @@ Item {
                   width: ListView.view.width
                   height: root.rowHeight
                   radius: root.cornerRadius
-                  color: hasCursor ? root.selectedBackground
-                    : (row.ticked ? Util.alpha(root.selectedBackground, 0.32) : "transparent")
+                  color: hasCursor ? root.selectedBackground : "transparent"
 
                   Row {
                     anchors.fill: parent
@@ -763,7 +762,9 @@ Item {
                       width: visible ? Style.space(16) : 0
                       height: parent.height
                       text: row.ticked ? "✓" : ""
-                      color: row.hasCursor ? root.selectedText : root.foreground
+                      // The accent, never the row foreground: the cursor row owns the
+                      // only background wash, so a tick has to read on its own.
+                      color: root.selectedText
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       verticalAlignment: Text.AlignVCenter
