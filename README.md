@@ -19,8 +19,22 @@ omarchy plugin enable sinkeat.clipboard
 ```
 
 The manifest declares `omarchy.clonedFrom = omarchy.clipboard`, so the existing
-`Super+Ctrl+V` binding routes here and Omarchy disables the built-in overlay.
-Removing the plugin restores it. No keybinding or config changes are required.
+`Super+Ctrl+V` binding routes here and Omarchy disables the built-in overlay. No
+keybinding or config changes are required.
+
+## Remove
+
+```bash
+omarchy plugin remove sinkeat.clipboard
+```
+
+That re-enables the built-in clipboard overlay and hands `Super+Ctrl+V` back to it.
+Clipboard history in `~/.local/state/omarchy/` is Omarchy's own and is left alone.
+
+## Dependencies
+
+Everything it calls ships with Omarchy: `wl-clipboard`, `wtype`, `jq`, and the
+`omarchy-clipboard-*` helpers. No network access, no elevated privileges.
 
 ## Shortcuts
 
@@ -56,8 +70,7 @@ ClipboardHistory.js    history model, selection set, and payload join
 ClipboardWrite.js      the wl-copy stdin lifecycle, shared by both writers
 paste-selection.sh     copies a joined selection and pastes it
 test/                  regression tests
-docs/                  design and verification records
-prototypes/phase-1/    retained interaction evidence
+docs/                  design records and the upstream proposal
 plan.md                the multi-select merge plan
 ```
 

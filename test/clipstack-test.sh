@@ -134,6 +134,22 @@ assert(
   'removeSelected drops exactly the ticked entries'
 )
 
+const huge1 = { type: 'text', text: 'a'.repeat(3 * 1024 * 1024) }
+const huge2 = { type: 'text', text: 'b'.repeat(3 * 1024 * 1024) }
+assert(
+  !history.selectionOverflows([huge1, huge2], select(huge1)),
+  'one large entry is still within the paste ceiling'
+)
+assert(
+  history.selectionOverflows([huge1, huge2], select(huge1, huge2)),
+  'a selection past the ceiling is refused, not truncated'
+)
+const refused = history.joinSelection([huge1, huge2], select(huge1, huge2))
+assert(
+  refused.overflow === true && refused.text === '' && refused.count === 2,
+  'an over-ceiling join yields no payload and says why'
+)
+
 const long = { type: 'text', text: 'x'.repeat(9000) + '\ntail' }
 const longRow = history.displayRows([long], '', 10)[0]
 assert(

@@ -758,6 +758,7 @@ Item {
                     // single-entry pick looks exactly as it did before.
                     Text {
                       id: check
+                      textFormat: Text.PlainText
                       visible: root.selectionCount > 0
                       width: visible ? Style.space(16) : 0
                       height: parent.height
@@ -889,9 +890,11 @@ Item {
                 anchors.rightMargin: Style.spacing.controlGap
                 anchors.verticalCenter: actionRow.verticalCenter
                 visible: !root.editing && root.selectionCount > 0
-                text: root.selectionCount + " selected  ·  Enter pastes "
-                  + (ClipboardHistory.selectionMime(root.history, root.selectedKeys) === "text/uri-list"
-                    ? "as files" : "as text")
+                text: ClipboardHistory.selectionOverflows(root.history, root.selectedKeys)
+                  ? root.selectionCount + " selected  ·  too large to paste, unselect some"
+                  : root.selectionCount + " selected  ·  Enter pastes "
+                    + (ClipboardHistory.selectionMime(root.history, root.selectedKeys) === "text/uri-list"
+                      ? "as files" : "as text")
                 color: root.foreground
                 opacity: 0.55
                 font.family: root.fontFamily
@@ -934,6 +937,7 @@ Item {
             visible: displayModel.count === 0
 
             Text {
+              textFormat: Text.PlainText
               text: "󰅌"
               color: root.selectedText
               opacity: 0.8

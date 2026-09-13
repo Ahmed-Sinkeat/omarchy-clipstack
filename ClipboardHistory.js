@@ -263,6 +263,27 @@ function fileUri(path) {
   return "file://" + encodeURI(String(path || ""))
 }
 
+// Ceiling on what one paste may materialize in the shell process. A refusal beats
+// a truncated paste: the user unselects instead of silently losing text.
+var selectionTextLimit = 4 * 1024 * 1024
+
+function selectionLine(entry) {
+  return entry.type === "image" ? fileUri(entry.path) : fullText(entry)
+}
+
+// Measures without concatenating, so a binding can ask before a paste exists.
+function selectionSize(history, keys) {
+  var entries = selectedEntries(history, keys)
+  var size = 0
+
+  for (var i = 0; i < entries.length; i++) size += selectionLine(entries[i]).length + 1
+  return size
+}
+
+function selectionOverflows(history, keys) {
+  return selectionSize(history, keys) > selectionTextLimit
+}
+
 // text/uri-list only when every selected entry is a file or an image: a uri-list
 // payload is invisible to a plain text editor, so anything mixed stays text/plain
 // and contributes image paths as file:// lines. Kept separate from the join so a
@@ -284,17 +305,17 @@ function selectionMime(history, keys) {
 // back, which keeps the copy round-tripping through our own history.
 function joinSelection(history, keys) {
   var entries = selectedEntries(history, keys)
-  var lines = []
+  if (selectionOverflows(history, keys))
+    return { text: "", mime: "", count: entries.length, overflow: true }
 
-  for (var i = 0; i < entries.length; i++) {
-    var entry = entries[i]
-    lines.push(entry.type === "image" ? fileUri(entry.path) : fullText(entry))
-  }
+  var lines = []
+  for (var i = 0; i < entries.length; i++) lines.push(selectionLine(entries[i]))
 
   return {
     text: lines.join("\n"),
     mime: selectionMime(history, keys),
-    count: entries.length
+    count: entries.length,
+    overflow: false
   }
 }
 
@@ -343,6 +364,8 @@ if (typeof module !== "undefined") {
     selectedEntries: selectedEntries,
     removeSelected: removeSelected,
     selectionMime: selectionMime,
+    selectionSize: selectionSize,
+    selectionOverflows: selectionOverflows,
     joinSelection: joinSelection
   }
 }
