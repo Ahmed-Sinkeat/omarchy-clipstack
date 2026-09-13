@@ -14,7 +14,7 @@ edit as a new entry, and `Esc` cancels with the original untouched.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/Ahmed-Sinkeat/omarchy-clipedit.git
+omarchy plugin add https://github.com/Ahmed-Sinkeat/omarchy-clipstack.git
 omarchy plugin enable sinkeat.clipboard
 ```
 
