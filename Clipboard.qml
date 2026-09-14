@@ -29,7 +29,12 @@ Item {
   property string editorSeed: ""
 
   property string historyPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
-  property string captureScript: root.omarchyPath + "/shell/plugins/clipboard/capture.sh"
+  property string captureScript: root.pluginDir + "capture.sh"
+  // False until history has loaded, and for good if it could not be read: a save
+  // before then would write a partial history over the real one.
+  property bool historyWritable: false
+  // The last copy was too large to keep. Cleared by the next copy that is kept.
+  property bool lastCopySkipped: false
   // Shares the [menu] surface tokens — themes that style the menu also
   // style the clipboard. Selected-row colors composed in the
   // singleton so consumers drop them straight into Rectangle bindings.
@@ -82,11 +87,14 @@ Item {
   }
 
   function loadHistory(raw) {
-    root.history = ClipboardHistory.parseHistory(raw)
+    var loaded = ClipboardHistory.parseHistory(raw, root.historyLimit)
+    root.history = loaded || []
+    root.historyWritable = loaded !== null
     if (root.opened) root.rebuildDisplay()
   }
 
   function saveHistory() {
+    if (!root.historyWritable) return
     historyFile.setText(JSON.stringify(root.history.slice(0, root.historyLimit), null, 2) + "\n")
   }
 
@@ -95,12 +103,15 @@ Item {
     if (!normalized) return
 
     root.history = ClipboardHistory.addEntry(root.history, normalized, root.historyLimit)
+    root.lastCopySkipped = false
     root.saveHistory()
     if (root.opened) root.rebuildDisplay()
   }
 
   function addClipboardJson(line) {
-    root.addClipboardEntry(ClipboardHistory.parseEntryJson(line))
+    var result = ClipboardHistory.captureResult(line)
+    if (result.kind === "skipped") root.lastCopySkipped = true
+    else if (result.kind === "entry") root.addClipboardEntry(result.entry)
   }
 
   function requestClearHistory() {
@@ -330,7 +341,7 @@ Item {
     return true
   }
 
-  Component.onCompleted: initProc.running = true
+  Component.onCompleted: loadProc.running = true
 
   ListModel { id: displayModel }
 
@@ -487,15 +498,27 @@ Item {
     referenceItem: card
   }
 
+  // Write-only. Reading goes through load-history.sh, which bounds and checks the
+  // file first; nothing else writes it, so there is nothing to watch for.
   FileView {
     id: historyFile
     path: root.historyPath
-    watchChanges: true
+    preload: false
     atomicWrites: true
     printErrors: false
-    onLoaded: root.loadHistory(text())
-    onLoadFailed: root.loadHistory("[]")
-    onFileChanged: reload()
+  }
+
+  // Watchers start only once history has loaded, so no copy can be saved over a
+  // history that has not been read yet.
+  Process {
+    id: loadProc
+    command: ["bash", root.pluginDir + "load-history.sh", root.historyPath, String(ClipboardHistory.historyFileLimit)]
+    stdout: StdioCollector { id: loadOutput; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 0) root.loadHistory(loadOutput.text)
+      else console.warn("clipboard: history could not be read (load-history.sh exited " + exitCode + "), not saving over it")
+      initProc.running = true
+    }
   }
 
   // Reap watchers left behind by a previous shell instance, then start our
@@ -503,7 +526,8 @@ Item {
   // the shell exits, however it exits, so no further lifecycle management.
   Process {
     id: initProc
-    command: ["pkill", "-f", "wl-paste .*--watch .*/shell/plugins/clipboard/capture\\.sh"]
+    command: ["pkill", "-f", "wl-paste .*--watch (.*/shell/plugins/clipboard/capture\\.sh|"
+      + root.captureScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")"]
     onExited: {
       currentProc.running = true
       textWatchProc.running = true
@@ -727,6 +751,29 @@ Item {
                 clip: true
                 spacing: Style.space(4)
                 boundsBehavior: Flickable.StopAtBounds
+
+                // Where the copy would have appeared, a quiet note that it was not kept.
+                // The Item owns the height: a Text sized from its own implicit height
+                // while eliding is a binding loop.
+                header: Item {
+                  width: resultList.width
+                  height: root.lastCopySkipped ? skippedNote.implicitHeight + Style.space(8) : 0
+
+                  Text {
+                    id: skippedNote
+                    textFormat: Text.PlainText
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: Style.space(12)
+                    visible: root.lastCopySkipped
+                    text: "Last copy not saved · over " + Math.round(ClipboardHistory.entryTextLimit / 1048576) + " MB"
+                    color: root.foreground
+                    opacity: 0.5
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
 
                 delegate: Rectangle {
                   id: row

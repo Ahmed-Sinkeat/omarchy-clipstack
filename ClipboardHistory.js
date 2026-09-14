@@ -1,12 +1,35 @@
+// Byte bounds for clipboard text. Without them one large copy was carried whole
+// through the watcher line, every save and every startup load, at several times
+// its size each time. Text is measured in UTF-16 units; a UTF-8 byte count is
+// never smaller, so an entry capture.sh accepts by bytes is always accepted here.
+var entryTextLimit = 2 * 1024 * 1024
+// The longest line the watcher can legitimately send: an entry at the limit
+// whose every character JSON-escapes to six.
+var captureLineLimit = entryTextLimit * 6 + 64
+// Serialized size of everything kept, newest first. Past it the oldest entries
+// are dropped, the same way the entry-count limit already drops them.
+var historyBudget = 8 * 1024 * 1024
+// Largest file load-history.sh accepts. It must cover the heaviest history the
+// budget allows, every kept unit a three-byte character, or the loader would
+// reject a file the overlay wrote itself.
+var historyFileLimit = 32 * 1024 * 1024
+
+function entrySize(entry) {
+  return JSON.stringify(entry).length
+}
+
 function normalizeEntry(value) {
-  if (typeof value === "string")
+  if (typeof value === "string") {
+    if (value.length > entryTextLimit) return null
     return value.trim().length > 0 ? { type: "text", text: value } : null
+  }
 
   if (!value || typeof value !== "object") return null
 
   var type = String(value.type || value.kind || "")
   if (type === "text") {
     var text = String(value.text || "")
+    if (text.length > entryTextLimit) return null
     return text.trim().length > 0 ? { type: "text", text: text } : null
   }
 
@@ -32,20 +55,25 @@ function entryKey(entry) {
   return "text:" + String(entry.text || "")
 }
 
-function parseHistory(raw) {
-  try {
-    var parsed = JSON.parse(String(raw || "[]"))
-    var next = []
-    if (!Array.isArray(parsed)) return next
+// Returns null, never [], for a history it cannot read: an empty result would be
+// saved over the file at the next copy and destroy it.
+function parseHistory(raw, limit) {
+  var parsed
+  try { parsed = JSON.parse(String(raw || "[]")) } catch (e) { return null }
+  if (!Array.isArray(parsed)) return null
 
-    for (var i = 0; i < parsed.length; i++) {
-      var entry = normalizeEntry(parsed[i])
-      if (entry) next.push(entry)
-    }
-    return next
-  } catch (e) {
-    return []
+  var max = limit === undefined || limit === null ? Infinity : Math.max(0, Number(limit) || 0)
+  var next = []
+  var used = 0
+  for (var i = 0; i < parsed.length && next.length < max; i++) {
+    var entry = normalizeEntry(parsed[i])
+    if (!entry) continue
+    var size = entrySize(entry)
+    if (next.length > 0 && used + size > historyBudget) break
+    used += size
+    next.push(entry)
   }
+  return next
 }
 
 function addEntry(history, entry, limit) {
@@ -58,11 +86,16 @@ function addEntry(history, entry, limit) {
 
   var key = entryKey(normalized)
   var next = [normalized]
+  var used = entrySize(normalized)
   var values = Array.isArray(history) ? history : []
 
+  // The newest entry is always kept; older ones only while they fit the budget.
   for (var i = 0; i < values.length && next.length < max; i++) {
     var existing = normalizeEntry(values[i])
     if (!existing || entryKey(existing) === key) continue
+    var size = entrySize(existing)
+    if (used + size > historyBudget) break
+    used += size
     next.push(existing)
   }
 
@@ -83,10 +116,20 @@ function clearHistory() {
   return []
 }
 
-function parseEntryJson(line) {
-  var raw = String(line || "").trim()
-  if (!raw) return null
-  try { return normalizeEntry(JSON.parse(raw)) } catch (e) { return null }
+// Classifies one line from the clipboard watcher. An oversized copy is reported
+// as skipped so the overlay can say so, whether capture.sh caught it or not. The
+// length check runs before parsing so a runaway line is never parsed at all.
+function captureResult(line) {
+  var raw = String(line || "")
+  if (raw.length > captureLineLimit) return { kind: "skipped" }
+
+  var value
+  try { value = JSON.parse(raw.trim()) } catch (e) { return { kind: "ignore" } }
+  if (value && value.type === "skipped") return { kind: "skipped" }
+  if (value && value.type === "text" && String(value.text || "").length > entryTextLimit) return { kind: "skipped" }
+
+  var entry = normalizeEntry(value)
+  return entry ? { kind: "entry", entry: entry } : { kind: "ignore" }
 }
 
 function searchableText(entry) {
@@ -350,7 +393,11 @@ if (typeof module !== "undefined") {
     addEntry: addEntry,
     removeEntryAt: removeEntryAt,
     clearHistory: clearHistory,
-    parseEntryJson: parseEntryJson,
+    captureResult: captureResult,
+    entryTextLimit: entryTextLimit,
+    captureLineLimit: captureLineLimit,
+    historyBudget: historyBudget,
+    historyFileLimit: historyFileLimit,
     searchableText: searchableText,
     previewText: previewText,
     imagePreviewText: imagePreviewText,
