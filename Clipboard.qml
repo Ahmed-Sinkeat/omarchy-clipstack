@@ -753,11 +753,17 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
 
                 // Where the copy would have appeared, a quiet note that it was not kept.
-                // The Item owns the height: a Text sized from its own implicit height
-                // while eliding is a binding loop.
+                // Its height comes from font metrics rather than from laying the text
+                // out, so the layout can never feed back into the note's own size.
                 header: Item {
                   width: resultList.width
-                  height: root.lastCopySkipped ? skippedNote.implicitHeight + Style.space(8) : 0
+                  height: root.lastCopySkipped ? skippedMetrics.height + Style.space(8) : 0
+
+                  FontMetrics {
+                    id: skippedMetrics
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
 
                   Text {
                     id: skippedNote
@@ -765,6 +771,7 @@ Item {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.leftMargin: Style.space(12)
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: root.lastCopySkipped
                     text: "Last copy not saved · over " + Math.round(ClipboardHistory.entryTextLimit / 1048576) + " MB"
                     color: root.foreground
