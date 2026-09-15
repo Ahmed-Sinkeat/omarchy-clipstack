@@ -12,11 +12,13 @@ set -o pipefail
 # never inherited, so it holds however the script is started.
 PATH=/usr/local/bin:/usr/bin
 
-# Largest text entry recorded, in bytes. ClipboardHistory.js holds the same limit
-# in UTF-16 units, and a byte count is never smaller than the unit count of the
-# text it decodes to, so an entry accepted here is always accepted there. A copy
-# over the limit is reported as skipped rather than carried into the shell.
+# Largest text entry kept inline in history, in bytes. ClipboardHistory.js holds
+# the same limit in UTF-16 units, and a byte count is never smaller than the unit
+# count of the text it decodes to, so an entry accepted here is accepted there.
+# A copy over it is kept as a file with a preview rather than dropped.
 ENTRY_LIMIT=${CLIPBOARD_ENTRY_LIMIT:-2097152}
+# A copy over ENTRY_LIMIT is kept as a file up to this size; larger is skipped.
+LARGE_LIMIT=${CLIPBOARD_LARGE_LIMIT:-268435456}
 # Largest image recorded, in bytes.
 IMAGE_LIMIT=${CLIPBOARD_IMAGE_LIMIT:-67108864}
 # Seconds a copy may take to arrive. The clipboard owner controls the stream and
@@ -24,14 +26,18 @@ IMAGE_LIMIT=${CLIPBOARD_IMAGE_LIMIT:-67108864}
 READ_DEADLINE=${CLIPBOARD_READ_DEADLINE:-10}
 
 # bash runs a command substitution it finds inside an arithmetic operand, and
-# all three of these reach $(( )) or timeout. Refuse anything but digits.
-for name in ENTRY_LIMIT IMAGE_LIMIT READ_DEADLINE; do
+# all four of these reach $(( )) or timeout. Refuse anything but digits.
+for name in ENTRY_LIMIT LARGE_LIMIT IMAGE_LIMIT READ_DEADLINE; do
   [[ ${!name} =~ ^[0-9]+$ ]] || { printf 'clipboard: %s must be a number\n' "$name" >&2; exit 1; }
 done
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
 IMAGE_DIR="$STATE_DIR/clipboard-images"
 mkdir -p "$IMAGE_DIR"
+TEXT_DIR="$STATE_DIR/clipboard-text"
+# Bytes of a large copy carried into history as its preview. Fixed, never from
+# the caller, so it needs none of the validation the limits above do.
+PREVIEW_BYTES=8192
 
 # The copy being read. It is removed however the script ends, killed included.
 tmp=
@@ -85,10 +91,7 @@ emit_image() {
     '{type:"image", mime:$mime, path:$path, capturedAt:$captured_at}'
 }
 
-emit_text() {
-  tmp=$(mktemp) || return 0
-  read_copy "$ENTRY_LIMIT" "$@" || { (( $? == 2 )) && emit_skipped; return 0; }
-
+emit_small_text() {
   perl -MEncode=decode,FB_CROAK,LEAVE_SRC -MJSON::PP=encode_json -0777 -e '
     my $raw = <STDIN>;
 
@@ -132,6 +135,74 @@ emit_text() {
     $text = decode("UTF-8", $raw) unless defined $text;
     print "{\"type\":\"text\",\"text\":", encode_json($text), "}\n";
   ' <"$tmp"
+}
+
+# A copy over the entry limit, kept as <sha256>.txt like an image. The encoding is
+# decided from a sample, by the same NUL-padding test emit_small_text applies to
+# the whole text, and converted as a stream, so the copy is never loaded whole.
+emit_large_text() {
+  local encoding converted bytes hash file
+
+  encoding=$(head -c 65536 -- "$tmp" | perl -0777 -ne '
+    if (/^(?:\xFF\xFE|\xFE\xFF)/) { print "UTF-16"; exit }
+    my $units = int(length($_) / 2);
+    exit unless $units && index($_, "\0") >= 0;
+    my ($even, $odd) = (0, 0);
+    for (my $i = 0; $i + 1 < length($_); $i += 2) {
+      $even++ if substr($_, $i, 1) eq "\0";
+      $odd++ if substr($_, $i + 1, 1) eq "\0";
+    }
+    if ($odd * 4 >= $units * 3 && $even * 4 < $units) { print "UTF-16LE" }
+    elsif ($even * 4 >= $units * 3 && $odd * 4 < $units) { print "UTF-16BE" }
+  ')
+
+  if [[ -n $encoding ]]; then
+    converted=$(mktemp --tmpdir="$TEXT_DIR" clipboard.XXXXXX) || return 0
+    if iconv -f "$encoding" -t UTF-8 "$tmp" >"$converted" 2>/dev/null; then
+      mv -f -- "$converted" "$tmp"
+    else
+      rm -f -- "$converted"
+    fi
+  fi
+
+  # read_copy bounded what arrived, but decoding to UTF-8 can grow it past the
+  # limit, so the size that is kept is the one that decides.
+  bytes=$(stat -c %s -- "$tmp")
+  if (( bytes > LARGE_LIMIT )); then
+    emit_skipped
+    return 0
+  fi
+
+  hash=$(sha256sum -- "$tmp" | awk '{print $1}')
+  file="$TEXT_DIR/$hash.txt"
+  if [[ -f $file && ! -L $file ]]; then
+    rm -f -- "$tmp"
+    # A fresh mtime keeps prune-text.sh from deleting it before its entry is back.
+    touch -- "$file"
+  else
+    mv -f -- "$tmp" "$file"
+  fi
+  tmp=
+
+  head -c "$PREVIEW_BYTES" -- "$file" | iconv -c -f UTF-8 -t UTF-8 \
+    | jq -cRs --arg path "$file" --argjson bytes "$bytes" \
+      '{type: "largetext", path: $path, bytes: $bytes, preview: .}'
+}
+
+# Staged to a file first, bounded at the large-copy limit and the read deadline,
+# so neither this script nor the shell ever holds more of a copy than it keeps.
+emit_text() {
+  local size
+  mkdir -p "$TEXT_DIR"
+  tmp=$(mktemp --tmpdir="$TEXT_DIR" clipboard.XXXXXX) || return 0
+  read_copy "$LARGE_LIMIT" "$@" || { (( $? == 2 )) && emit_skipped; return 0; }
+
+  size=$(stat -c %s -- "$tmp")
+  if (( size <= ENTRY_LIMIT )); then
+    emit_small_text
+  else
+    emit_large_text
+  fi
 }
 
 # In watch mode the copy arrives on stdin, read by cat so the deadline covers it.

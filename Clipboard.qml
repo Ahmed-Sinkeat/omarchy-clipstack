@@ -29,6 +29,8 @@ Item {
   property string editorSeed: ""
 
   property string historyPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
+  // Where capture.sh keeps copies too large to hold in history.
+  property string textDir: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/clipboard-text"
   property string captureScript: root.pluginDir + "capture.sh"
   // Every helper starts from nothing but this. The fixed PATH keeps a shadow
   // executable in a user-writable PATH directory from standing in for a tool a
@@ -112,7 +114,14 @@ Item {
 
   function saveHistory() {
     if (!root.historyWritable) return
-    historyFile.setText(JSON.stringify(root.history.slice(0, root.historyLimit), null, 2) + "\n")
+    var kept = root.history.slice(0, root.historyLimit)
+    historyFile.setText(JSON.stringify(kept, null, 2) + "\n")
+    // Delete large-copy files history no longer uses. Only a history that loaded
+    // gets here, so one that could not be read never loses its copies.
+    // ponytail: sweeps on every save; skip when history has never held a large
+    // copy if the spawn ever shows up in a profile.
+    Quickshell.execDetached(["bash", root.pluginDir + "prune-text.sh", root.textDir, root.historyPath]
+      .concat(ClipboardHistory.largeTextNames(kept)))
   }
 
   function addClipboardEntry(entry) {
@@ -270,7 +279,7 @@ Item {
   function applySelected(row) {
     if (!row) return
     root.opened = false
-    if (row.entryType === "image") {
+    if (row.entryType === "image" || row.entryType === "largetext") {
       Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", row.mime, row.path])
     } else if (row.fullText) {
       Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--shift-insert", "--history-index", String(row.historyIndex)])
@@ -280,7 +289,7 @@ Item {
   function copySelected(row) {
     if (!row) return
     root.opened = false
-    if (row.entryType === "image") {
+    if (row.entryType === "image" || row.entryType === "largetext") {
       Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-file", "--copy-only", row.mime, row.path])
     } else if (row.fullText) {
       Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-paste-text", "--copy-only", "--history-index", String(row.historyIndex)])
@@ -288,7 +297,8 @@ Item {
   }
 
   function openSelected(row) {
-    if (!row) return
+    // ponytail: a large copy has no Open yet; open it from clipboard-text if asked for.
+    if (!row || row.entryType === "largetext") return
     root.opened = false
     Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-open", "--history-index", String(row.historyIndex)])
   }
@@ -829,7 +839,7 @@ Item {
                     anchors.leftMargin: Style.space(12)
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.lastCopySkipped
-                    text: "Last copy not saved · too large or too slow"
+                    text: "Last copy not saved · over " + Math.round(ClipboardHistory.largeTextLimit / 1048576) + " MB or too slow"
                     color: root.foreground
                     opacity: 0.5
                     font.family: root.fontFamily

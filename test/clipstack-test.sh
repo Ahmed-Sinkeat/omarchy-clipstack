@@ -246,6 +246,65 @@ for (let i = 1; i <= 400; i++) {
   seededMix = history.addEntry(seededMix, { type: 'text', text: i + unit.repeat(size) }, 500)
   if (i % 50 === 0) checkCeiling(seededMix, `seeded mix after ${i} copies`)
 }
+// --- Large copies ----------------------------------------------------------
+// A text copy over the entry limit is kept as a file, like an image, with only
+// a short preview in history, so the shell never holds the whole text.
+const hex = (c) => c.repeat(64)
+const largePath = '/home/u/.local/state/omarchy/clipboard-text/' + hex('a') + '.txt'
+const large = (path, bytes, preview) => ({ type: 'largetext', path, bytes, preview })
+
+assert(history.largeTextLimit === 256 * MiB && history.largeTextBudget === 1024 * MiB, 'large copies are limited to 256 MiB each and 1 GiB together')
+const captureLarge = Number((captureSource.match(/CLIPBOARD_LARGE_LIMIT:-(\d+)/) || [])[1])
+assert(captureLarge === history.largeTextLimit, `capture.sh and ClipboardHistory.js agree on the large-copy limit (${captureLarge})`)
+
+const keptLarge = history.normalizeEntry(large(largePath, 3 * MiB, 'x'.repeat(9000)))
+assert(
+  keptLarge && keptLarge.type === 'largetext' && keptLarge.path === largePath && keptLarge.bytes === 3 * MiB
+    && keptLarge.preview.length === history.largePreviewLimit,
+  'a large copy keeps its path and size, with its preview capped'
+)
+for (const [label, bad] of [
+  ['a path outside the large-copy folder', large('/etc/passwd', 3 * MiB, 'x')],
+  ['a parent-directory segment', large('/home/u/../u/.local/state/omarchy/clipboard-text/' + hex('a') + '.txt', 3 * MiB, 'x')],
+  ['a name that is not a content hash', large('/home/u/.local/state/omarchy/clipboard-text/notes.txt', 3 * MiB, 'x')],
+  ['a size over the limit', large(largePath, history.largeTextLimit + 1, 'x')],
+  ['no size', large(largePath, undefined, 'x')],
+]) assert(history.normalizeEntry(bad) === null, `a large copy with ${label} is rejected`)
+
+assert(history.entryKey(keptLarge) === 'largetext:' + largePath, 'a large copy is keyed by its file')
+const [largeRow] = history.displayRows([keptLarge], '', 10)
+assert(
+  largeRow.entryType === 'largetext' && largeRow.path === largePath && largeRow.mime === 'text/plain;charset=utf-8'
+    && largeRow.previewText.startsWith('3.0 MB'),
+  `a large copy shows its size in the list (${largeRow.previewText.slice(0, 16)})`
+)
+assert(history.displayRows([large(largePath, 3 * MiB, 'find me inside')], 'me inside', 10).length === 1, 'a large copy is found by its preview')
+assert(history.selectionOverflows([keptLarge, text1], select(keptLarge)), 'a large copy is never joined into a paste')
+assert(history.entryForAction([keptLarge], 0).type === 'largetext', 'actions see a large copy as one, so it is never offered for editing')
+
+let disk = []
+for (let i = 0; i < 5; i++) {
+  disk = history.addEntry(disk, large(largePath.replace(hex('a'), hex(String(i))), 250 * MiB, 'copy ' + i), 500)
+  disk = history.addEntry(disk, { type: 'text', text: 'small ' + i }, 500)
+}
+const diskShape = disk.map(e => e.type === 'largetext' ? 'L' + e.preview.slice(-1) : 's' + e.text.slice(-1)).join(' ')
+assert(
+  disk.filter(e => e.type === 'largetext').length === 4 && disk.filter(e => e.type === 'text').length === 5,
+  `adding drops the oldest large copies past 1 GiB and keeps every small entry (${diskShape})`
+)
+const fiveLarge = JSON.stringify([0, 1, 2, 3, 4].map(i => large(largePath.replace(hex('a'), hex(String(i))), 250 * MiB, 'p' + i)))
+assert(history.parseHistory(fiveLarge, 500).length === 4, 'loading drops large copies past 1 GiB too')
+
+assert(
+  history.largeTextNames([keptLarge, text1, large('/etc/passwd', 1, 'x')]).join(',') === hex('a') + '.txt',
+  'only valid large copies name files to keep'
+)
+
+let previews = []
+for (let i = 0; i < 520; i++)
+  previews = history.addEntry(previews, large(largePath.replace(hex('a'), i.toString(16).padStart(64, '0')), 3 * MiB, heaviest.cjk.repeat(8192)), 500)
+checkCeiling(previews, 'large copies with the heaviest previews')
+
 JS
 
 # --- capture.sh and load-history.sh ---------------------------------------
@@ -263,12 +322,35 @@ out=$(printf '%s' '0123456789abcdef' | capture env CLIPBOARD_ENTRY_LIMIT=16)
 [[ $out == '{"type":"text","text":"0123456789abcdef"}' ]] && ok 'capture records text at the entry limit' || not_ok 'capture records text at the entry limit' "$out"
 
 out=$(printf '%s' '0123456789abcdefX' | capture env CLIPBOARD_ENTRY_LIMIT=16)
-[[ $out == '{"type":"skipped","reason":"too-large"}' ]] && ok 'capture reports text one byte over the limit as skipped' || not_ok 'capture reports text one byte over the limit as skipped' "$out"
+path=$(printf '%s' "$out" | jq -r 'select(.type == "largetext") | .path' 2>/dev/null)
+[[ -n $path && -f $path && $(cat "$path") == '0123456789abcdefX' && $(printf '%s' "$out" | jq -r '.bytes') == 17 && $(printf '%s' "$out" | jq -r '.preview') == '0123456789abcdefX' ]] \
+  && ok 'a copy over the entry limit is kept as a large copy on disk' || not_ok 'a copy over the entry limit is kept as a large copy on disk' "$out"
+[[ $path == "$T/state/omarchy/clipboard-text/$(printf '%s' '0123456789abcdefX' | sha256sum | cut -d' ' -f1).txt" ]] \
+  && ok 'a large copy is stored under its content hash' || not_ok 'a large copy is stored under its content hash' "$path"
 
-# capture.sh stops reading at the limit, so the writer feeding it gets SIGPIPE:
-# that is the bound working, not a failure of this pipeline.
-out=$(set +o pipefail; head -c $((3 * 1024 * 1024)) /dev/zero | tr '\0' a | capture env)
-[[ $out == '{"type":"skipped","reason":"too-large"}' ]] && ok 'capture skips a 3 MiB copy at the default limit' || not_ok 'capture skips a 3 MiB copy at the default limit' "${out:0:200}"
+again=$(printf '%s' '0123456789abcdefX' | capture env CLIPBOARD_ENTRY_LIMIT=16)
+[[ $again == "$out" && $(find "$T/state/omarchy/clipboard-text" -type f -name '*.txt' | wc -l) -eq 1 ]] \
+  && ok 'copying the same large text again reuses its file' || not_ok 'copying the same large text again reuses its file' "$again"
+
+out=$(head -c 33 /dev/zero | tr '\0' a | capture env CLIPBOARD_ENTRY_LIMIT=16 CLIPBOARD_LARGE_LIMIT=32)
+[[ $out == '{"type":"skipped","reason":"too-large"}' && -z $(find "$T/state/omarchy/clipboard-text" -name 'clipboard.*') ]] \
+  && ok 'a copy over the large-copy limit is skipped and leaves no file behind' || not_ok 'a copy over the large-copy limit is skipped and leaves no file behind' "$out"
+
+out=$(head -c $((3 * 1024 * 1024)) /dev/zero | tr '\0' a | capture env)
+path=$(printf '%s' "$out" | jq -r '.path // empty' 2>/dev/null)
+[[ $(printf '%s' "$out" | jq -r '.type') == largetext && -f $path && $(stat -c %s "$path") -eq $((3 * 1024 * 1024)) && $(printf '%s' "$out" | jq -r '.preview | length') -eq 8192 ]] \
+  && ok 'a 3 MiB copy is kept whole on disk with an 8 KB preview' || not_ok 'a 3 MiB copy is kept whole on disk with an 8 KB preview' "${out:0:200}"
+
+out=$(for i in $(seq 1 4000); do printf '\xe4\xb8\xad'; done | capture env CLIPBOARD_ENTRY_LIMIT=16)
+preview=$(printf '%s' "$out" | jq -j '.preview')
+[[ $(printf '%s' "$out" | jq -r '.preview | length') -eq 2730 ]] && printf '%s' "$preview" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 \
+  && ok 'a preview ends on a whole UTF-8 character' || not_ok 'a preview ends on a whole UTF-8 character' "$(printf '%s' "$out" | jq -r '.preview | length')"
+
+utf16_text="large utf-16 copy $(head -c 40 /dev/zero | tr '\0' x)"
+out=$({ printf '\xff\xfe'; printf '%s' "$utf16_text" | iconv -f UTF-8 -t UTF-16LE; } | capture env CLIPBOARD_ENTRY_LIMIT=16)
+path=$(printf '%s' "$out" | jq -r '.path // empty' 2>/dev/null)
+[[ -f $path && $(cat "$path") == "$utf16_text" && $(printf '%s' "$out" | jq -r '.preview') == "$utf16_text" ]] \
+  && ok 'a large UTF-16 copy is stored converted to UTF-8' || not_ok 'a large UTF-16 copy is stored converted to UTF-8' "$out"
 
 out=$(printf '0123456789abcdef' | capture_as image/png env CLIPBOARD_IMAGE_LIMIT=16)
 [[ $out == *'"type":"image"'* && -f $T/state/omarchy/clipboard-images/$(printf '0123456789abcdef' | sha256sum | cut -d' ' -f1).png ]] \
@@ -300,6 +382,14 @@ out=$(printf abc | capture env "CLIPBOARD_ENTRY_LIMIT=x[\$(touch $T/pwned)]" 2>/
 (( status != 0 )) && [[ ! -e $T/pwned && -z $out ]] \
   && ok 'a non-numeric entry limit is refused instead of evaluated' \
   || not_ok 'a non-numeric entry limit is refused instead of evaluated' "status=$status out=$out pwned=$([[ -e $T/pwned ]] && echo yes)"
+
+# The large-copy limit reaches $(( )) in read_copy the same way, and an array
+# subscript is evaluated there even though a bare command substitution is not.
+rm -f "$T/pwned"
+out=$(printf abc | capture env "CLIPBOARD_LARGE_LIMIT=x[\$(touch $T/pwned)]" 2>/dev/null) && status=0 || status=$?
+(( status != 0 )) && [[ ! -e $T/pwned && -z $out ]] \
+  && ok 'a non-numeric large-copy limit is refused instead of evaluated' \
+  || not_ok 'a non-numeric large-copy limit is refused instead of evaluated' "status=$status out=$out pwned=$([[ -e $T/pwned ]] && echo yes)"
 
 # Clipboard text passes through head, so a head earlier on the caller's PATH
 # would see every copy. capture.sh pins its own PATH instead of inheriting one.
@@ -345,3 +435,28 @@ reset; printf '{"not":"an array"}' >"$H"; load
 
 reset; printf '["private"]' >"$H"; chmod 000 "$H"; load; chmod 600 "$H"
 [[ $status -eq 3 && -z $out && -f $H && -z $(rejected) ]] && ok 'an unreadable history reports status 3 and is left in place' || not_ok 'an unreadable history reports status 3 and is left in place' "status=$status out=$out"
+
+# --- prune-text.sh -----------------------------------------------------------
+D="$T/prune/omarchy/clipboard-text"; PH="$T/prune/omarchy/clipboard-history.json"
+A=$(printf 'a%.0s' $(seq 64)).txt; B=$(printf 'b%.0s' $(seq 64)).txt; C=$(printf 'c%.0s' $(seq 64)).txt; L=$(printf 'd%.0s' $(seq 64)).txt
+prune_reset() {
+  rm -rf "$T/prune"; mkdir -p "$D"
+  printf a >"$D/$A"; printf b >"$D/$B"; printf c >"$D/$C"; printf n >"$D/notes.txt"
+  printf t >"$T/prune/target.txt"; ln -s "$T/prune/target.txt" "$D/$L"
+  printf s >"$D/clipboard.stale1"
+  touch -d '2 minutes ago' "$D/$A" "$D/$B" "$D/notes.txt"; touch -h -d '2 minutes ago' "$D/$L"
+  touch -d '2 hours ago' "$D/clipboard.stale1"
+}
+
+prune_reset
+bash "$ROOT/prune-text.sh" "$D" "$PH" "$A"
+[[ -f $D/$A ]] && ok 'the sweep keeps a large copy history still uses' || not_ok 'the sweep keeps a large copy history still uses'
+[[ ! -e $D/$B ]] && ok 'the sweep deletes an old large copy history no longer uses' || not_ok 'the sweep deletes an old large copy history no longer uses'
+[[ -f $D/$C ]] && ok 'the sweep leaves a copy captured moments ago for its entry to arrive' || not_ok 'the sweep leaves a copy captured moments ago for its entry to arrive'
+[[ -f $D/notes.txt ]] && ok 'the sweep ignores files not named like a large copy' || not_ok 'the sweep ignores files not named like a large copy'
+[[ -L $D/$L && -f $T/prune/target.txt ]] && ok 'the sweep never deletes a symlink or its target' || not_ok 'the sweep never deletes a symlink or its target'
+[[ ! -e $D/clipboard.stale1 ]] && ok 'the sweep clears temp files a dead capture left behind' || not_ok 'the sweep clears temp files a dead capture left behind'
+
+prune_reset; printf '[]' >"$PH.rejected-20260101-000000-1"
+bash "$ROOT/prune-text.sh" "$D" "$PH"
+[[ -f $D/$A && -f $D/$B ]] && ok 'the sweep deletes nothing while a rejected history may still need its copies' || not_ok 'the sweep deletes nothing while a rejected history may still need its copies'

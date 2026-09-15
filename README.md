@@ -80,16 +80,21 @@ never stall or exhaust the shell or the disk:
 
 | | Limit |
 |---|---|
-| One text entry | 2 MB |
+| Text kept inline in history | 2 MB per entry |
+| Larger copies, kept as files | 256 MB per copy, 1 GB for all of them |
 | One image | 64 MB |
 | Time for a copy to arrive | 10 seconds |
 | All kept history | 8 MB, newest first, and at most 500 entries |
 | History file accepted at startup | 32 MB |
 
-A copy over its limit, or one still arriving after 10 seconds, still pastes
-normally. It just isn't saved to history: whatever was read is deleted, and the
-overlay says *Last copy not saved · too large or too slow* where it would have
-appeared.
+A copy over 2 MB is kept as a file in `~/.local/state/omarchy/clipboard-text/`
+with only a short preview in history, so it pastes back whole without the shell
+ever holding it. Past 1 GB of large copies the oldest are dropped, and a file is
+deleted once no history entry uses it. A copy over 256 MB, or one still arriving
+after 10 seconds, still pastes normally but isn't saved: whatever was read is
+deleted, and the overlay says *Last copy not saved · over 256 MB or too slow*
+where it would have appeared. Large copies can't be edited, opened, or joined
+with other entries.
 
 The history file is checked before it is read. If it is something the overlay
 could not have written — a symlink, a FIFO or other special file, a file over
@@ -104,8 +109,9 @@ Clipboard.qml          overlay, selection state, and the editor pane
 ClipboardHistory.js    history model, selection set, and payload join
 ClipboardWrite.js      the wl-copy stdin lifecycle, shared by both writers
 paste-selection.sh     copies a joined selection and pastes it
-capture.sh             records each copy, skipping text over the entry limit
+capture.sh             records each copy, keeping large text as a file
 load-history.sh        checks and bounds the history file before the overlay reads it
+prune-text.sh          deletes large-copy files history no longer uses
 test/                  regression tests
 docs/                  design records and the upstream proposal
 plan.md                the multi-select merge plan
@@ -114,7 +120,7 @@ plan.md                the multi-select merge plan
 ## Verification
 
 ```bash
-./test/clipstack-test.sh    # selection, join, byte limits, capture and load
+./test/clipstack-test.sh    # selection, join, byte limits, large copies, capture, load
 qmllint Clipboard.qml       # QML parses
 omarchy plugin validate .   # manifest
 ```
