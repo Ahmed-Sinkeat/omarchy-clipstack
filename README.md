@@ -69,17 +69,21 @@ entries you picked. An empty edit is not saved. Images offer no Edit action.
 
 ## Limits
 
-Clipboard text is bounded at every step, so one huge copy can never stall or
-exhaust the shell:
+Clipboard history is bounded at every step, so one huge or never-ending copy can
+never stall or exhaust the shell or the disk:
 
 | | Limit |
 |---|---|
 | One text entry | 2 MB |
+| One image | 64 MB |
+| Time for a copy to arrive | 10 seconds |
 | All kept history | 8 MB, newest first, and at most 500 entries |
 | History file accepted at startup | 32 MB |
 
-A copy over 2 MB still pastes normally. It just isn't saved to history, and the
-overlay says *Last copy not saved · over 2 MB* where it would have appeared.
+A copy over its limit, or one still arriving after 10 seconds, still pastes
+normally. It just isn't saved to history: whatever was read is deleted, and the
+overlay says *Last copy not saved · too large or too slow* where it would have
+appeared.
 
 The history file is checked before it is read. If it is something the overlay
 could not have written — a symlink, a FIFO or other special file, a file over

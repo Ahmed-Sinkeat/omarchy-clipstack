@@ -261,7 +261,9 @@ chmod +x "$T/bin/wl-paste"
 
 ok() { echo "ok - $1"; }
 not_ok() { echo "not ok - $1"; [[ -n ${2:-} ]] && printf '%s\n' "$2"; exit 1; }
-capture() { PATH="$T/bin:$PATH" XDG_STATE_HOME="$T/state" "$@" bash "$ROOT/capture.sh" text; }
+capture_as() { local mode=$1; shift; PATH="$T/bin:$PATH" XDG_STATE_HOME="$T/state" "$@" bash "$ROOT/capture.sh" "$mode"; }
+capture() { capture_as text "$@"; }
+leftovers() { find "$T/state" -name 'clipboard.*' | head -1; }
 
 out=$(printf '%s' '0123456789abcdef' | capture env CLIPBOARD_ENTRY_LIMIT=16)
 [[ $out == '{"type":"text","text":"0123456789abcdef"}' ]] && ok 'capture records text at the entry limit' || not_ok 'capture records text at the entry limit' "$out"
@@ -273,6 +275,27 @@ out=$(printf '%s' '0123456789abcdefX' | capture env CLIPBOARD_ENTRY_LIMIT=16)
 # that is the bound working, not a failure of this pipeline.
 out=$(set +o pipefail; head -c $((3 * 1024 * 1024)) /dev/zero | tr '\0' a | capture env)
 [[ $out == '{"type":"skipped","reason":"too-large"}' ]] && ok 'capture skips a 3 MiB copy at the default limit' || not_ok 'capture skips a 3 MiB copy at the default limit' "${out:0:200}"
+
+out=$(printf '0123456789abcdef' | capture_as image/png env CLIPBOARD_IMAGE_LIMIT=16)
+[[ $out == *'"type":"image"'* && -f $T/state/omarchy/clipboard-images/$(printf '0123456789abcdef' | sha256sum | cut -d' ' -f1).png ]] \
+  && ok 'capture records an image at the image limit' || not_ok 'capture records an image at the image limit' "$out"
+
+out=$(set +o pipefail; head -c 1048576 /dev/zero | capture_as image/png env CLIPBOARD_IMAGE_LIMIT=16)
+[[ $out == '{"type":"skipped","reason":"too-large"}' && -z $(leftovers) ]] \
+  && ok 'capture skips an image over the limit and deletes what it read' || not_ok 'capture skips an image over the limit and deletes what it read' "out=$out left=$(leftovers)"
+
+# A clipboard owner that sends a few bytes and then never ends its stream.
+for mode in image/png text; do
+  start=$SECONDS
+  out=$(capture_as "$mode" env CLIPBOARD_READ_DEADLINE=1 < <(printf abc; sleep 6))
+  (( SECONDS - start <= 3 )) && [[ $out == '{"type":"skipped","reason":"too-large"}' && -z $(leftovers) ]] \
+    && ok "capture drops a stalled $mode stream at the read deadline" \
+    || not_ok "capture drops a stalled $mode stream at the read deadline" "out=$out took=$((SECONDS - start))s left=$(leftovers)"
+done
+
+capture_as image/png env CLIPBOARD_READ_DEADLINE=1 < <(printf abc; sleep 6) >/dev/null &
+sleep 0.3; kill -TERM $!; wait $! 2>/dev/null || true
+[[ -z $(leftovers) ]] && ok 'a capture killed mid-read leaves no partial file' || not_ok 'a capture killed mid-read leaves no partial file' "$(leftovers)"
 
 load() {
   if out=$(timeout 5 bash "$ROOT/load-history.sh" "$H" "${1:-1048576}"); then status=0; else status=$?; fi

@@ -11,10 +11,20 @@ set -o pipefail
 # text it decodes to, so an entry accepted here is always accepted there. A copy
 # over the limit is reported as skipped rather than carried into the shell.
 ENTRY_LIMIT=${CLIPBOARD_ENTRY_LIMIT:-2097152}
+# Largest image recorded, in bytes.
+IMAGE_LIMIT=${CLIPBOARD_IMAGE_LIMIT:-67108864}
+# Seconds a copy may take to arrive. The clipboard owner controls the stream and
+# can stall it or never end it, so the reader is killed at this deadline.
+READ_DEADLINE=${CLIPBOARD_READ_DEADLINE:-10}
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
 IMAGE_DIR="$STATE_DIR/clipboard-images"
 mkdir -p "$IMAGE_DIR"
+
+# The copy being read. It is removed however the script ends, killed included.
+tmp=
+trap 'rm -f -- "$tmp"' EXIT
+trap 'exit 143' TERM INT HUP
 
 types=$(wl-paste --list-types 2>/dev/null || true)
 
@@ -22,40 +32,51 @@ if [[ ${CLIPBOARD_STATE:-} == "sensitive" ]] || grep -qx 'x-kde-passwordManagerH
   exit 0
 fi
 
+emit_skipped() {
+  printf '{"type":"skipped","reason":"too-large"}\n'
+}
+
+# Writes at most limit + 1 bytes from the command into $tmp, killing the command at
+# the read deadline. Returns 0 for a complete copy within the limit, 1 for nothing
+# to record, and 2 for a copy over the limit or cut off by the deadline.
+read_copy() {
+  local limit=$1 status size
+  shift
+  timeout -k 1 "$READ_DEADLINE" "$@" 2>/dev/null | head -c $((limit + 1)) >"$tmp"
+  status=$?
+  size=$(stat -c %s -- "$tmp")
+  # A reader stopped by head at the limit exits on SIGPIPE, so size is checked first.
+  (( size > limit || status == 124 || status == 137 )) && return 2
+  (( status == 0 && size > 0 )) || return 1
+}
+
 emit_image() {
-  local mime="$1"
-  local ext tmp hash file
+  local mime=$1 ext hash file
+  shift
 
   ext=${mime#image/}
   [[ $ext == jpeg ]] && ext=jpg
 
   tmp=$(mktemp --tmpdir="$IMAGE_DIR" clipboard.XXXXXX) || return 0
-  cat >"$tmp"
-  if [[ ! -s $tmp ]]; then
-    rm -f "$tmp"
-    return 0
-  fi
+  read_copy "$IMAGE_LIMIT" "$@" || { (( $? == 2 )) && emit_skipped; return 0; }
 
   hash=$(sha256sum "$tmp" | awk '{print $1}')
   file="$IMAGE_DIR/$hash.$ext"
-  if [[ -e $file ]]; then
-    rm -f "$tmp"
-  else
+  if [[ ! -e $file ]]; then
     mv "$tmp" "$file"
   fi
+  tmp=
 
   jq -cn --arg mime "$mime" --arg path "$file" --arg captured_at "$(date +'%A %H:%M')" \
     '{type:"image", mime:$mime, path:$path, capturedAt:$captured_at}'
 }
 
 emit_text() {
-  head -c $((ENTRY_LIMIT + 1)) | ENTRY_LIMIT=$ENTRY_LIMIT perl -MEncode=decode,FB_CROAK,LEAVE_SRC -MJSON::PP=encode_json -0777 -e '
+  tmp=$(mktemp) || return 0
+  read_copy "$ENTRY_LIMIT" "$@" || { (( $? == 2 )) && emit_skipped; return 0; }
+
+  perl -MEncode=decode,FB_CROAK,LEAVE_SRC -MJSON::PP=encode_json -0777 -e '
     my $raw = <STDIN>;
-    exit unless length $raw;
-    if (length($raw) > $ENV{ENTRY_LIMIT}) {
-      print "{\"type\":\"skipped\",\"reason\":\"too-large\"}\n";
-      exit;
-    }
 
     my $encoding;
     my $heuristic_encoding = 0;
@@ -96,21 +117,22 @@ emit_text() {
     }
     $text = decode("UTF-8", $raw) unless defined $text;
     print "{\"type\":\"text\",\"text\":", encode_json($text), "}\n";
-  '
+  ' <"$tmp"
 }
 
+# In watch mode the copy arrives on stdin, read by cat so the deadline covers it.
 case "${1:-}" in
-text) emit_text; exit 0 ;;
-image/*) emit_image "$1"; exit 0 ;;
+text) emit_text cat; exit 0 ;;
+image/*) emit_image "$1" cat; exit 0 ;;
 esac
 
 for mime in image/png image/jpeg image/webp image/gif image/bmp image/tiff; do
   if grep -qx "$mime" <<<"$types"; then
-    timeout 2s wl-paste --type "$mime" 2>/dev/null | emit_image "$mime"
+    emit_image "$mime" wl-paste --type "$mime"
     exit 0
   fi
 done
 
 if grep -q '^text/' <<<"$types" || grep -qx 'UTF8_STRING' <<<"$types" || grep -qx 'STRING' <<<"$types"; then
-  wl-paste --type text --no-newline 2>/dev/null | emit_text
+  emit_text wl-paste --type text --no-newline
 fi

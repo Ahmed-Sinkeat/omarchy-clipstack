@@ -773,7 +773,7 @@ Item {
                     anchors.leftMargin: Style.space(12)
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.lastCopySkipped
-                    text: "Last copy not saved · over " + Math.round(ClipboardHistory.entryTextLimit / 1048576) + " MB"
+                    text: "Last copy not saved · too large or too slow"
                     color: root.foreground
                     opacity: 0.5
                     font.family: root.fontFamily
