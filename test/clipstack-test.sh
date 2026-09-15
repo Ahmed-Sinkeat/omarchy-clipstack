@@ -280,6 +280,9 @@ out=$(printf '0123456789abcdef' | capture_as image/png env CLIPBOARD_IMAGE_LIMIT
 [[ $out == *'"type":"image"'* && -f $T/state/omarchy/clipboard-images/$(printf '0123456789abcdef' | sha256sum | cut -d' ' -f1).png ]] \
   && ok 'capture records an image at the image limit' || not_ok 'capture records an image at the image limit' "$out"
 
+out=$(printf '0123456789abcdef' | capture_as image/png env CLIPBOARD_IMAGE_LIMIT=16)
+[[ $out == *'"type":"image"'* && -z $(leftovers) ]] && ok 'capturing an image already kept leaves no temporary file' || not_ok 'capturing an image already kept leaves no temporary file' "out=$out left=$(leftovers)"
+
 out=$(set +o pipefail; head -c 1048576 /dev/zero | capture_as image/png env CLIPBOARD_IMAGE_LIMIT=16)
 [[ $out == '{"type":"skipped","reason":"too-large"}' && -z $(leftovers) ]] \
   && ok 'capture skips an image over the limit and deletes what it read' || not_ok 'capture skips an image over the limit and deletes what it read' "out=$out left=$(leftovers)"

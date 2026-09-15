@@ -62,7 +62,9 @@ emit_image() {
 
   hash=$(sha256sum "$tmp" | awk '{print $1}')
   file="$IMAGE_DIR/$hash.$ext"
-  if [[ ! -e $file ]]; then
+  if [[ -e $file ]]; then
+    rm -f "$tmp"
+  else
     mv "$tmp" "$file"
   fi
   tmp=
