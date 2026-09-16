@@ -14,6 +14,10 @@
 
 set -o pipefail
 
+# Resolved from here, not from the caller's PATH: clipboard contents pass
+# through these tools.
+PATH=/usr/local/bin:/usr/bin
+
 path=${1:?usage: load-history.sh <path> <max-bytes>}
 ceiling=${2:?usage: load-history.sh <path> <max-bytes>}
 

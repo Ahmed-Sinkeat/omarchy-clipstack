@@ -6,6 +6,12 @@
 
 set -o pipefail
 
+# Every tool below is resolved from this PATH rather than the caller's. Raw
+# clipboard text and images pass through them, so a shadow executable in a
+# user-writable PATH directory would otherwise see every copy. Assigned here,
+# never inherited, so it holds however the script is started.
+PATH=/usr/local/bin:/usr/bin
+
 # Largest text entry recorded, in bytes. ClipboardHistory.js holds the same limit
 # in UTF-16 units, and a byte count is never smaller than the unit count of the
 # text it decodes to, so an entry accepted here is always accepted there. A copy
@@ -17,6 +23,12 @@ IMAGE_LIMIT=${CLIPBOARD_IMAGE_LIMIT:-67108864}
 # can stall it or never end it, so the reader is killed at this deadline.
 READ_DEADLINE=${CLIPBOARD_READ_DEADLINE:-10}
 
+# bash runs a command substitution it finds inside an arithmetic operand, and
+# all three of these reach $(( )) or timeout. Refuse anything but digits.
+for name in ENTRY_LIMIT IMAGE_LIMIT READ_DEADLINE; do
+  [[ ${!name} =~ ^[0-9]+$ ]] || { printf 'clipboard: %s must be a number\n' "$name" >&2; exit 1; }
+done
+
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
 IMAGE_DIR="$STATE_DIR/clipboard-images"
 mkdir -p "$IMAGE_DIR"
@@ -26,9 +38,9 @@ tmp=
 trap 'rm -f -- "$tmp"' EXIT
 trap 'exit 143' TERM INT HUP
 
-types=$(wl-paste --list-types 2>/dev/null || true)
-
-if [[ ${CLIPBOARD_STATE:-} == "sensitive" ]] || grep -qx 'x-kde-passwordManagerHint' <<<"$types"; then
+# In watch mode wl-paste sets this from the same x-kde-passwordManagerHint the
+# snapshot path looks for below, so this covers every copy that arrives on stdin.
+if [[ ${CLIPBOARD_STATE:-} == "sensitive" ]]; then
   exit 0
 fi
 
@@ -127,6 +139,11 @@ case "${1:-}" in
 text) emit_text cat; exit 0 ;;
 image/*) emit_image "$1" cat; exit 0 ;;
 esac
+
+# Snapshot mode only: nothing set CLIPBOARD_STATE here, so the offered types
+# are the only signal, and they also say what the selection holds.
+types=$(wl-paste --list-types 2>/dev/null || true)
+grep -qx 'x-kde-passwordManagerHint' <<<"$types" && exit 0
 
 for mime in image/png image/jpeg image/webp image/gif image/bmp image/tiff; do
   if grep -qx "$mime" <<<"$types"; then

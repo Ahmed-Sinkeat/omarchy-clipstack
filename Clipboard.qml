@@ -30,6 +30,23 @@ Item {
 
   property string historyPath: Quickshell.env("HOME") + "/.local/state/omarchy/clipboard-history.json"
   property string captureScript: root.pluginDir + "capture.sh"
+  // Every helper starts from nothing but this. The fixed PATH keeps a shadow
+  // executable in a user-writable PATH directory from standing in for a tool a
+  // copy passes through, and clearing the rest leaves behind LD_PRELOAD,
+  // BASH_ENV and PERL5OPT, each a way into the bash and perl that read one.
+  // HOME and XDG_STATE_HOME locate the history and the image directory,
+  // WAYLAND_DISPLAY and XDG_RUNTIME_DIR reach the compositor, and the last four
+  // date-stamp a capture in the user's own timezone and language.
+  readonly property var helperEnv: {
+    var env = { "PATH": "/usr/local/bin:/usr/bin" }
+    var names = ["HOME", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "WAYLAND_DISPLAY",
+      "TZ", "LANG", "LC_ALL", "LC_TIME"]
+    for (var i = 0; i < names.length; i++) {
+      var value = Quickshell.env(names[i])
+      if (value) env[names[i]] = value
+    }
+    return env
+  }
   // False until history has loaded, and for good if it could not be read: a save
   // before then would write a partial history over the real one.
   property bool historyWritable: false
@@ -361,6 +378,8 @@ Item {
       return argv
     }
     onStarted: ClipboardWrite.writePendingCopy(copyProc)
+    clearEnvironment: true
+    environment: root.helperEnv
   }
 
   Component {
@@ -512,8 +531,10 @@ Item {
   // history that has not been read yet.
   Process {
     id: loadProc
-    command: ["bash", root.pluginDir + "load-history.sh", root.historyPath, String(ClipboardHistory.historyFileLimit)]
+    command: ["/usr/bin/bash", root.pluginDir + "load-history.sh", root.historyPath, String(ClipboardHistory.historyFileLimit)]
     stdout: StdioCollector { id: loadOutput; waitForEnd: true }
+    clearEnvironment: true
+    environment: root.helperEnv
     onExited: function(exitCode) {
       if (exitCode === 0) root.loadHistory(loadOutput.text)
       else console.warn("clipboard: history could not be read (load-history.sh exited " + exitCode + "), not saving over it")
@@ -526,8 +547,10 @@ Item {
   // the shell exits, however it exits, so no further lifecycle management.
   Process {
     id: initProc
-    command: ["pkill", "-f", "wl-paste .*--watch (.*/shell/plugins/clipboard/capture\\.sh|"
+    command: ["/usr/bin/pkill", "-f", "wl-paste .*--watch (.*/shell/plugins/clipboard/capture\\.sh|"
       + root.captureScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")"]
+    clearEnvironment: true
+    environment: root.helperEnv
     onExited: {
       currentProc.running = true
       textWatchProc.running = true
@@ -538,6 +561,8 @@ Item {
   Process {
     id: currentProc
     command: [root.captureScript]
+    clearEnvironment: true
+    environment: root.helperEnv
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.addClipboardJson(text)
@@ -546,7 +571,9 @@ Item {
 
   Process {
     id: textWatchProc
-    command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "text", "--watch", root.captureScript, "text"]
+    command: ["/usr/bin/setpriv", "--pdeathsig", "TERM", "/usr/bin/wl-paste", "--type", "text", "--watch", root.captureScript, "text"]
+    clearEnvironment: true
+    environment: root.helperEnv
     onExited: watchRestartTimer.restart()
     stdout: SplitParser {
       onRead: function(data) { root.addClipboardJson(data) }
@@ -555,7 +582,9 @@ Item {
 
   Process {
     id: imageWatchProc
-    command: ["setpriv", "--pdeathsig", "TERM", "wl-paste", "--type", "image/png", "--watch", root.captureScript, "image/png"]
+    command: ["/usr/bin/setpriv", "--pdeathsig", "TERM", "/usr/bin/wl-paste", "--type", "image/png", "--watch", root.captureScript, "image/png"]
+    clearEnvironment: true
+    environment: root.helperEnv
     onExited: watchRestartTimer.restart()
     stdout: SplitParser {
       onRead: function(data) { root.addClipboardJson(data) }

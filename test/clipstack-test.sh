@@ -252,16 +252,10 @@ JS
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/state"
-cat >"$T/bin/wl-paste" <<'SH'
-#!/bin/bash
-[[ $1 == --list-types ]] && printf 'text/plain\n'
-exit 0
-SH
-chmod +x "$T/bin/wl-paste"
 
 ok() { echo "ok - $1"; }
 not_ok() { echo "not ok - $1"; [[ -n ${2:-} ]] && printf '%s\n' "$2"; exit 1; }
-capture_as() { local mode=$1; shift; PATH="$T/bin:$PATH" XDG_STATE_HOME="$T/state" "$@" bash "$ROOT/capture.sh" "$mode"; }
+capture_as() { local mode=$1; shift; XDG_STATE_HOME="$T/state" "$@" bash "$ROOT/capture.sh" "$mode"; }
 capture() { capture_as text "$@"; }
 leftovers() { find "$T/state" -name 'clipboard.*' | head -1; }
 
@@ -299,6 +293,26 @@ done
 capture_as image/png env CLIPBOARD_READ_DEADLINE=1 < <(printf abc; sleep 6) >/dev/null &
 sleep 0.3; kill -TERM $!; wait $! 2>/dev/null || true
 [[ -z $(leftovers) ]] && ok 'a capture killed mid-read leaves no partial file' || not_ok 'a capture killed mid-read leaves no partial file' "$(leftovers)"
+
+# A limit reaches $(( )), where bash runs a command substitution it finds in an
+# operand. It has to be refused before the arithmetic, not evaluated.
+out=$(printf abc | capture env "CLIPBOARD_ENTRY_LIMIT=x[\$(touch $T/pwned)]" 2>/dev/null) && status=0 || status=$?
+(( status != 0 )) && [[ ! -e $T/pwned && -z $out ]] \
+  && ok 'a non-numeric entry limit is refused instead of evaluated' \
+  || not_ok 'a non-numeric entry limit is refused instead of evaluated' "status=$status out=$out pwned=$([[ -e $T/pwned ]] && echo yes)"
+
+# Clipboard text passes through head, so a head earlier on the caller's PATH
+# would see every copy. capture.sh pins its own PATH instead of inheriting one.
+cat >"$T/bin/head" <<SH
+#!/bin/bash
+touch "$T/shadow-ran"
+exec /usr/bin/head "\$@"
+SH
+chmod +x "$T/bin/head"
+out=$(printf abc | PATH="$T/bin:$PATH" bash "$ROOT/capture.sh" text)
+[[ $out == '{"type":"text","text":"abc"}' && ! -e $T/shadow-ran ]] \
+  && ok 'a shadow tool on the caller PATH never sees a copy' \
+  || not_ok 'a shadow tool on the caller PATH never sees a copy' "out=$out shadow=$([[ -e $T/shadow-ran ]] && echo ran)"
 
 load() {
   if out=$(timeout 5 bash "$ROOT/load-history.sh" "$H" "${1:-1048576}"); then status=0; else status=$?; fi
