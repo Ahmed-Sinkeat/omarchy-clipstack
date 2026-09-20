@@ -14,6 +14,12 @@ Item {
   // Resolved from this file's own URL so the paste helper beside it runs
   // wherever the plugin happens to be installed.
   readonly property string pluginDir: decodeURIComponent(String(Qt.resolvedUrl(".")).replace(/^file:\/\//, ""))
+  readonly property string searchPath: [
+    Quickshell.env("HOME") + "/.local/bin",
+    Quickshell.env("HOME") + "/.config/omarchy/plugins/sinkeat.image-search",
+    "/usr/local/bin",
+    "/usr/bin"
+  ].join(":")
   property bool opened: false
   property string filterText: ""
   property int selectedIndex: 0
@@ -315,7 +321,7 @@ Item {
   function searchSelected(row, privateWindow) {
     if (!row || row.entryType !== "image" || !row.path) return
     root.opened = false
-    var args = ["omarchy-capture-image-search"]
+    var args = ["/usr/bin/env", "PATH=" + root.searchPath, "omarchy-capture-image-search"]
     if (privateWindow) args.push("--private")
     args.push("--file", String(row.path))
     Quickshell.execDetached(args)

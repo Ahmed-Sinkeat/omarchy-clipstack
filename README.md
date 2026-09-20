@@ -57,8 +57,11 @@ the `omarchy-clipboard-*` helpers. No network access, no elevated privileges.
 | Copy the edit as a new entry | `Ctrl+Enter` (in the editor) |
 | Cancel the edit | `Esc` |
 
-`Ctrl+I` needs [omarchy-image-search](https://github.com/Ahmed-Sinkeat/omarchy-image-search)
-on your `PATH`, and only applies to image entries. Without it the key does
+`Ctrl+I` needs [omarchy-image-search](https://github.com/Ahmed-Sinkeat/omarchy-image-search),
+and only applies to image entries. It is looked up in `~/.local/bin` and in that
+plugin's own folder, so either install route works: its installer puts it on
+your `PATH`, while `omarchy plugin add` installs into a folder that is on no
+`PATH` at all. Without it the key does
 nothing — there is no error and no setup to undo.
 
 Nothing has to be memorised: both actions are buttons in the detail pane
