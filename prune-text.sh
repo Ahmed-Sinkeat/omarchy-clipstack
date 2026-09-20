@@ -12,6 +12,12 @@
 
 set -o pipefail
 
+# This script deletes files, and resolves find and rm to do it. Pinned here the
+# way capture.sh, load-history.sh and paste-selection.sh pin it, so a shadow
+# executable on the caller's PATH can never stand in for either. Assigned,
+# never inherited, so it holds however the script is started.
+PATH=/usr/local/bin:/usr/bin
+
 dir=${1:?usage: prune-text.sh <text-dir> <history-path> [name ...]}
 history=${2:?usage: prune-text.sh <text-dir> <history-path> [name ...]}
 shift 2

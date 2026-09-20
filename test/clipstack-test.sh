@@ -404,6 +404,24 @@ out=$(printf abc | PATH="$T/bin:$PATH" bash "$ROOT/capture.sh" text)
   && ok 'a shadow tool on the caller PATH never sees a copy' \
   || not_ok 'a shadow tool on the caller PATH never sees a copy' "out=$out shadow=$([[ -e $T/shadow-ran ]] && echo ran)"
 
+# The sweep deletes files, so a shadow find or rm matters more there than a
+# shadow reader does. prune-text.sh pins the same PATH for that reason.
+for shadowed in find rm; do
+  cat >"$T/bin/$shadowed" <<SH
+#!/bin/bash
+touch "$T/shadow-swept"
+exec /usr/bin/$shadowed "\$@"
+SH
+  chmod +x "$T/bin/$shadowed"
+done
+rm -f "$T/shadow-swept"
+mkdir -p "$T/shadowdir"
+PATH="$T/bin:$PATH" bash "$ROOT/prune-text.sh" "$T/shadowdir" "$T/shadowdir/history.json" >/dev/null 2>&1
+[[ ! -e $T/shadow-swept ]] \
+  && ok 'a shadow tool on the caller PATH never runs during a sweep' \
+  || not_ok 'a shadow tool on the caller PATH never runs during a sweep' "shadow=ran"
+rm -f "$T/bin/find" "$T/bin/rm"
+
 load() {
   if out=$(timeout 5 bash "$ROOT/load-history.sh" "$H" "${1:-1048576}"); then status=0; else status=$?; fi
 }

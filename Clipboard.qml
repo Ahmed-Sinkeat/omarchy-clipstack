@@ -120,7 +120,7 @@ Item {
     // gets here, so one that could not be read never loses its copies.
     // ponytail: sweeps on every save; skip when history has never held a large
     // copy if the spawn ever shows up in a profile.
-    Quickshell.execDetached(["bash", root.pluginDir + "prune-text.sh", root.textDir, root.historyPath]
+    Quickshell.execDetached(["/usr/bin/bash", root.pluginDir + "prune-text.sh", root.textDir, root.historyPath]
       .concat(ClipboardHistory.largeTextNames(kept)))
   }
 
