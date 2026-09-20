@@ -293,6 +293,24 @@ Item {
     Quickshell.execDetached([root.omarchyPath + "/bin/omarchy-clipboard-open", "--history-index", String(row.historyIndex)])
   }
 
+  function searchIndex(index, privateWindow) {
+    if (index < 0 || index >= displayModel.count) return
+    root.searchSelected(displayModel.get(index), privateWindow)
+  }
+
+  // Reverse image search, handed to omarchy-image-search rather than rebuilt
+  // here: the upload is a shell script with its own tests, and duplicating it
+  // in QML would put it somewhere CI cannot reach. Resolved by name the way the
+  // Hyprland binding resolves it, so a system without the tool does nothing.
+  function searchSelected(row, privateWindow) {
+    if (!row || row.entryType !== "image" || !row.path) return
+    root.opened = false
+    var args = ["omarchy-capture-image-search"]
+    if (privateWindow) args.push("--private")
+    args.push("--file", String(row.path))
+    Quickshell.execDetached(args)
+  }
+
   // Ticking advances the cursor: a selection is usually built by running down
   // consecutive rows.
   function toggleSelected() {
@@ -661,6 +679,15 @@ Item {
 
           if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_E) {
             root.openEditor()
+            event.accepted = true
+            return
+          }
+
+          // Only image rows can be searched; searchSelected ignores the rest.
+          if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_I) {
+            if (root.cursorActive) {
+              root.searchIndex(root.selectedIndex, (event.modifiers & Qt.ShiftModifier) !== 0)
+            }
             event.accepted = true
             return
           }

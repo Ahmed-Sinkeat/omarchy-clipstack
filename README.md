@@ -52,8 +52,14 @@ the `omarchy-clipboard-*` helpers. No network access, no elevated privileges.
 | Remove every ticked entry | `Delete` |
 | Drop the selection | `Esc` |
 | Edit the entry under the cursor | `Ctrl+E` |
+| Reverse image search the image under the cursor | `Ctrl+I` |
+| …in a private browser window | `Ctrl+Shift+I` |
 | Copy the edit as a new entry | `Ctrl+Enter` (in the editor) |
 | Cancel the edit | `Esc` |
+
+`Ctrl+I` needs [omarchy-image-search](https://github.com/Ahmed-Sinkeat/omarchy-image-search)
+on your `PATH`, and only applies to image entries. Without it the key does
+nothing — there is no error and no setup to undo.
 
 Nothing has to be memorised: both actions are buttons in the detail pane
 (`Select  Ctrl+Enter` and `Edit  Ctrl+E`), a ticked row is marked with an accent `✓`,
